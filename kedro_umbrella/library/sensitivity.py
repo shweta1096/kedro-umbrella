@@ -45,9 +45,8 @@ class Model:
 
     def __init__(self, regressor: torch.nn.Module, X_inv_xform, Y_inv_xform, params):
         self.model = regressor
-        if X_inv_xform and Y_inv_xform:
-            self.X_inv_xform = X_inv_xform
-            self.Y_inv_xform = Y_inv_xform
+        self.X_inv_xform = X_inv_xform
+        self.Y_inv_xform = Y_inv_xform
         self.NUM_FEATURES = params['NUM_FEATURES']
         self.LOW = np.array(params['LOW'])
         self.HIGH = np.array(params['HIGH'])
@@ -151,47 +150,6 @@ def compute_query_range(sample, a_min=None, a_max=None, divide=10):
     return query_min, query_max
 
 
-def difference_metric(grid, diff_type="classification", step=10):
-    """
-    Define a difference metric between a point and its neighbors to find
-    high elevation area surrounded by flat points
-    """
-
-    def _do_diff(grid, diff_type, i, j, neighbors):
-        if diff_type == "classification":
-            # true for any difference
-            diff_ = np.abs(grid[i, j] - neighbors) > 0
-        elif diff_type == "regression":
-            # keep the numerical value
-            diff_ = np.abs(grid[i, j] - neighbors)
-        else:
-            raise ValueError(f"Unknown diff_type: {diff_type}")
-        return diff_
-
-    diff = np.zeros_like(grid)
-    diff_pos = np.zeros((grid.shape[0], grid.shape[1], 2), dtype=int)
-    for i in range(step, grid.shape[0] - step):
-        for j in range(step, grid.shape[1] - step):
-            neighbor_idx = np.array(
-                [
-                    (i - step, j),
-                    (i + step, j),
-                    (i, j - step),
-                    (i, j + step),
-                    (i - step, j - step),
-                    (i - step, j + step),
-                    (i + step, j - step),
-                    (i + step, j + step),
-                ]
-            )
-            neighbors = grid[neighbor_idx[:, 0], neighbor_idx[:, 1]]
-            diff_ = _do_diff(grid, diff_type, i, j, neighbors)
-            max_idx = np.argmax(diff_)
-            diff_pos[i, j] = neighbor_idx[max_idx]
-            diff[i, j] = diff_[max_idx]
-
-    # Shrink grid to avoid sharp diff at boundary
-    return diff[step:-step, step:-step], diff_pos[step:-step, step:-step]
 
 
 def plot_difference(feat1, feat2, grid, labels, diff_step=10):
@@ -493,8 +451,11 @@ def set_parameters(params):
     logger.info(f"GRID_SIZE: {GRID_SIZE}")
     logger.info(f"REPORT_DIR: {REPORT_DIR}")
 
-def sensitivity_analysis(model_: torch.nn.Module,  X_inv_xform, Y_inv_xform, 
-                         parameters: dict):
+# =================
+#      PUBLIC
+# =================
+def sensitivity_analysis_with_inv(model_: torch.nn.Module, 
+                                  X_inv_xform, Y_inv_xform, parameters: dict):
     """
     Perform sensitivity analysis on a given model with specified parameters. 
     
@@ -510,8 +471,9 @@ def sensitivity_analysis(model_: torch.nn.Module,  X_inv_xform, Y_inv_xform,
     
     Args:
         model_ (torch.nn.Module): The model to be analyzed.
-        parameters (dict): A dictionary of parameters to set for the model.
         X_inv_xform, Y_inv_xform: inverse transforms to project back to full space
+        parameters (dict): A dictionary of parameters to set for the model.
+
     
     Returns:
         tuple: A tuple containing the results of the sensitivity analysis:
@@ -523,7 +485,6 @@ def sensitivity_analysis(model_: torch.nn.Module,  X_inv_xform, Y_inv_xform,
     Typing partition: 
         P1 = {model}
     """
-
     set_parameters(parameters)
 
     model = Model(model_, X_inv_xform, Y_inv_xform, parameters)
@@ -537,3 +498,52 @@ def sensitivity_analysis(model_: torch.nn.Module,  X_inv_xform, Y_inv_xform,
 
     return res.x1, res.x2, res.y1, res.y2
 
+def sensitivity_analysis(model_: torch.nn.Module, parameters: dict):
+    """
+    See `sensitivity_analysis_with_inv` documentation.
+    """
+    return sensitivity_analysis_with_inv(model_, 
+                                         X_inv_xform=None, Y_inv_xform=None, 
+                                         parameters=parameters)
+
+def difference_metric(grid, diff_type="classification", step=10):
+    """
+    Define a difference metric between a point and its neighbors to find
+    high elevation area surrounded by flat points
+    """
+
+    def _do_diff(grid, diff_type, i, j, neighbors):
+        if diff_type == "classification":
+            # true for any difference
+            diff_ = np.abs(grid[i, j] - neighbors) > 0
+        elif diff_type == "regression":
+            # keep the numerical value
+            diff_ = np.abs(grid[i, j] - neighbors)
+        else:
+            raise ValueError(f"Unknown diff_type: {diff_type}")
+        return diff_
+
+    diff = np.zeros_like(grid)
+    diff_pos = np.zeros((grid.shape[0], grid.shape[1], 2), dtype=int)
+    for i in range(step, grid.shape[0] - step):
+        for j in range(step, grid.shape[1] - step):
+            neighbor_idx = np.array(
+                [
+                    (i - step, j),
+                    (i + step, j),
+                    (i, j - step),
+                    (i, j + step),
+                    (i - step, j - step),
+                    (i - step, j + step),
+                    (i + step, j - step),
+                    (i + step, j + step),
+                ]
+            )
+            neighbors = grid[neighbor_idx[:, 0], neighbor_idx[:, 1]]
+            diff_ = _do_diff(grid, diff_type, i, j, neighbors)
+            max_idx = np.argmax(diff_)
+            diff_pos[i, j] = neighbor_idx[max_idx]
+            diff[i, j] = diff_[max_idx]
+
+    # Shrink grid to avoid sharp diff at boundary
+    return diff[step:-step, step:-step], diff_pos[step:-step, step:-step]
